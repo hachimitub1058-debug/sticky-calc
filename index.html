@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="付箋電卓">
+<title>付箋電卓</title>
+<style>
+:root{
+  --bg:#f4f4f4; --note:#84f2f6; --text:#4a3b1e;
+  --num:#2b87ff; --op:#f7f7f2; --fn:#716e69; --eq:#f23348; --clr:#b57aef; --merge:#a6e84d;
+  --line:#999;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#1c1c1e; --note:#2ab5bb; --text:#fff; --op:#3a3a3c; --line:#666; }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:-apple-system,"Hiragino Sans",sans-serif;overflow:hidden;overscroll-behavior:none}
+#app{display:flex;flex-direction:column;height:100%;max-width:520px;margin:0 auto;
+  padding:env(safe-area-inset-top) 10px calc(env(safe-area-inset-bottom) + 10px)}
+header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opacity:.7}
+#notes{position:relative;flex:1;min-height:120px;touch-action:none}
+.note{position:absolute;background:var(--note);color:var(--text);border-radius:12px;
+  padding:10px 16px;font-size:34px;font-weight:500;text-align:right;min-width:90px;
+  box-shadow:0 2px 4px rgba(0,0,0,.15);touch-action:none;white-space:nowrap}
+.note.drag{z-index:50;box-shadow:0 8px 16px rgba(0,0,0,.3);transform:scale(1.04)}
+.note.press{filter:brightness(.85)}
+.note.target{outline:3px solid var(--merge)}
+#inputrow{display:grid;grid-template-columns:62px 1fr 62px;gap:10px;align-items:center;margin:8px 0}
+#disp{background:var(--note);border-radius:12px;height:62px;padding:2px 14px;text-align:right;
+  position:relative;touch-action:none;display:flex;flex-direction:column;justify-content:center}
+#formula{font-size:13px;height:16px;opacity:.7;line-height:16px}
+#val{font-size:34px;font-weight:500;line-height:38px;white-space:nowrap;overflow:hidden}
+#hint{position:absolute;left:8px;top:2px;font-size:11px;opacity:.5}
+.btn{border:none;border-radius:50%;aspect-ratio:1;width:100%;font-size:30px;color:#fff;
+  background:var(--num);font-weight:300;touch-action:manipulation;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0}
+.btn:active{filter:brightness(.8)}
+.btn.op{background:var(--op);color:var(--text);border:1px solid var(--line)}
+.btn.fn{background:var(--fn)}
+.btn.eq{background:var(--eq)}
+.btn.clr{background:var(--clr)}
+.btn.merge{background:var(--merge);color:#222}
+#pad{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+#ghost{position:fixed;z-index:100;pointer-events:none;display:none}
+#menu{position:fixed;z-index:200;display:none;background:var(--bg);border:1px solid var(--line);
+  border-radius:14px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.35);width:min(300px,90vw)}
+#menu button{display:block;width:100%;margin:6px 0;padding:12px;border-radius:10px;
+  border:1px solid var(--line);background:var(--op);color:var(--text);font-size:18px;text-align:center}
+#menu .cancel{background:transparent;opacity:.7}
+#toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#000c;color:#fff;
+  padding:8px 14px;border-radius:20px;font-size:14px;display:none;z-index:300}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>付箋電卓</header>
+  <div id="notes"></div>
+  <div id="inputrow">
+    <button class="btn clr" id="btnC">C</button>
+    <div id="disp"><span id="hint">↑ドラッグで付箋に</span><div id="formula"></div><div id="val">0</div></div>
+    <button class="btn merge" id="btnMerge" title="付箋を合算">
+      <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="#222" stroke-width="3" stroke-linecap="round">
+        <path d="M3 3l8 8M3 11V3h8M27 3l-8 8M27 11V3h-8M3 27l8-8M3 19v8h8M27 27l-8-8M27 19v8h-8"/>
+      </svg>
+    </button>
+  </div>
+  <div id="pad"></div>
+</div>
+<div id="ghost" class="note"></div>
+<div id="menu"></div>
+<div id="toast"></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const notesEl = $('notes'), dispEl = $('disp'), valEl = $('val'), formulaEl = $('formula');
+  const ghost = $('ghost'), menu = $('menu'), toastEl = $('toast');
+  const OPS = {'+':'＋','-':'－','*':'×','/':'÷'};
+  const STORE = 'sticky-calc-v1';
+  const TAX_RATE = 1.10;
+
+  // ---------- 状態 ----------
+  let cur = '0', acc = null, op = null, fresh = true;
+  let notes = []; // {id, v, x, y}  x,y は領域に対する比率(0-1)
+
+  // ---------- 数値整形 ----------
+  const clean = n => parseFloat(Number(n).toPrecision(12));
+  const fmtNum = n => clean(n).toLocaleString('ja-JP', {maximumFractionDigits: 10});
+  function fmtTyped(s){
+    const neg = s.startsWith('-'); if (neg) s = s.slice(1);
+    const [i, d] = s.split('.');
+    const out = Number(i).toLocaleString('ja-JP') + (d !== undefined ? '.' + d : '');
+    return (neg ? '-' : '') + out;
+  }
+  const curNum = () => parseFloat(cur) || 0;
+
+  function compute(a, o, b){
+    switch(o){
+      case '+': return a + b;
+      case '-': return a - b;
+      case '*': return a * b;
+      case '/': return b === 0 ? NaN : a / b;
+    }
+  }
+
+  // ---------- 保存 ----------
+  function save(){
+    try { localStorage.setItem(STORE, JSON.stringify({notes})); } catch(e){}
+  }
+  function load(){
+    try {
+      const d = JSON.parse(localStorage.getItem(STORE) || 'null');
+      if (d && Array.isArray(d.notes)) notes = d.notes;
+    } catch(e){}
+  }
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  function toast(msg){
+    toastEl.textContent = msg; toastEl.style.display = 'block';
+    clearTimeout(toast.t); toast.t = setTimeout(() => toastEl.style.display = 'none', 1600);
+  }
+
+  // ---------- 表示 ----------
+  function renderDisplay(){
+    valEl.textContent = fmtTyped(cur);
+    formulaEl.textContent = (acc !== null && op) ? fmtNum(acc) + ' ' + OPS[op] : '';
+  }
+
+  function renderNotes(){
+    notesEl.innerHTML = '';
+    const W = notesEl.clientWidth, H = notesEl.clientHeight;
+    for (const n of notes){
+      const el = document.createElement('div');
+      el.className = 'note'; el.dataset.id = n.id;
+      el.textContent = fmtNum(n.v);
+      notesEl.appendChild(el);
+      const w = el.offsetWidth, h = el.offsetHeight;
+      el.style.left = Math.min(Math.max(0, n.x * W), Math.max(0, W - w)) + 'px';
+      el.style.top  = Math.min(Math.max(0, n.y * H), Math.max(0, H - h)) + 'px';
+      attachNote(el, n);
+    }
+  }
+
+  // ---------- 電卓ロジック ----------
+  function inputDigit(d){
+    if (fresh){ cur = d === '.' ? '0.' : d; fresh = false; return; }
+    if (d === '.' && cur.includes('.')) return;
+    if (cur.replace(/[-.]/g, '').length >= 12) return;
+    cur = (cur === '0' && d !== '.') ? d : cur + d;
+  }
+  function pressOp(o){
+    if (acc !== null && op && !fresh){
+      const r = compute(acc, op, curNum());
+      if (isNaN(r)) return err();
+      acc = clean(r); cur = String(acc);
+    } else acc = curNum();
+    op = o; fresh = true;
+  }
+  function pressEq(){
+    if (acc !== null && op){
+      const r = compute(acc, op, curNum());
+      if (isNaN(r)) return err();
+      cur = String(clean(r)); acc = null; op = null; fresh = true;
+    }
+  }
+  function err(){ toast('0では割れません'); resetCalc(); }
+  function resetCalc(){ cur = '0'; acc = null; op = null; fresh = true; }
+
+  function handleKey(k){
+    if (/^[0-9.]$/.test(k)) inputDigit(k);
+    else if ('+-*/'.includes(k)) pressOp(k);
+    else if (k === '=') pressEq();
+    else if (k === 'back'){
+      if (!fresh){ cur = cur.length > 1 && !(cur.length === 2 && cur[0] === '-') ? cur.slice(0, -1) : '0'; }
+    }
+    else if (k === 'sign'){ if (curNum() !== 0) cur = cur.startsWith('-') ? cur.slice(1) : '-' + cur; }
+    else if (k === 'pct'){ cur = String(clean(curNum() / 100)); fresh = true; }
+    else if (k === 'tax'){ cur = String(Math.floor(curNum() * TAX_RATE)); fresh = true; }
+    renderDisplay();
+  }
+
+  // ---------- キーパッド ----------
+  const layout = [
+    ['7','7'],['8','8'],['9','9'],['/','÷','op'],['back','⌫','fn'],
+    ['4','4'],['5','5'],['6','6'],['*','×','op'],['sign','±','fn'],
+    ['1','1'],['2','2'],['3','3'],['-','－','op'],['pct','%','fn'],
+    ['0','0'],['.','・'],['=','＝','eq'],['+','＋','op'],['tax','TAX','fn'],
+  ];
+  const pad = $('pad');
+  for (const [k, label, cls] of layout){
+    const b = document.createElement('button');
+    b.className = 'btn ' + (cls || ''); b.textContent = label;
+    if (k === 'tax') b.style.fontSize = '22px';
+    b.addEventListener('click', () => handleKey(k));
+    pad.appendChild(b);
+  }
+
+  // C: 短押し=入力クリア / 長押し=全付箋削除
+  (() => {
+    const b = $('btnC'); let timer = null, long = false;
+    b.addEventListener('pointerdown', () => {
+      long = false;
+      timer = setTimeout(() => {
+        long = true;
+        if (notes.length){ notes = []; save(); renderNotes(); toast('付箋をすべて削除しました'); }
+      }, 600);
+    });
+    const end = () => clearTimeout(timer);
+    b.addEventListener('pointerup', () => { end(); if (!long){ resetCalc(); renderDisplay(); } });
+    b.addEventListener('pointerleave', end);
+    b.addEventListener('pointercancel', end);
+  })();
+
+  // 緑ボタン: 付箋を全部足し算して1枚に
+  $('btnMerge').addEventListener('click', () => {
+    if (notes.length === 0){ toast('付箋がありません'); return; }
+    const sum = clean(notes.reduce((s, n) => s + n.v, 0));
+    const first = notes[0];
+    notes = [{id: uid(), v: sum, x: first.x, y: first.y}];
+    save(); renderNotes();
+  });
+
+  // ---------- 入力欄 → 付箋 ----------
+  (() => {
+    let sx, sy, moved = false, active = false;
+    dispEl.addEventListener('pointerdown', e => {
+      active = true; moved = false; sx = e.clientX; sy = e.clientY;
+      dispEl.setPointerCapture(e.pointerId);
+    });
+    dispEl.addEventListener('pointermove', e => {
+      if (!active) return;
+      if (!moved && Math.hypot(e.clientX - sx, e.clientY - sy) > 8){
+        if (curNum() === 0){ active = false; return; }
+        moved = true; ghost.textContent = fmtTyped(cur); ghost.style.display = 'block';
+      }
+      if (moved){
+        ghost.style.left = (e.clientX - ghost.offsetWidth / 2) + 'px';
+        ghost.style.top  = (e.clientY - ghost.offsetHeight / 2) + 'px';
+      }
+    });
+    const finish = e => {
+      if (!active) return; active = false;
+      if (!moved) return;
+      ghost.style.display = 'none';
+      const area = notesEl.getBoundingClientRect(), dr = dispEl.getBoundingClientRect();
+      if (e.clientY < dr.top - 10 && e.clientY > area.top - 30){
+        const w = ghost.offsetWidth, h = ghost.offsetHeight;
+        const x = Math.min(Math.max(0, e.clientX - area.left - w / 2), area.width - w) / area.width;
+        const y = Math.min(Math.max(0, e.clientY - area.top - h / 2), area.height - h) / area.height;
+        notes.push({id: uid(), v: curNum(), x, y});
+        resetCalc(); renderDisplay(); save(); renderNotes();
+      }
+    };
+    dispEl.addEventListener('pointerup', finish);
+    dispEl.addEventListener('pointercancel', () => { active = false; ghost.style.display = 'none'; });
+  })();
+
+  // ---------- 付箋の操作 ----------
+  function attachNote(el, n){
+    let sx, sy, ox, oy, moved = false, long = false, timer = null, active = false;
+    el.addEventListener('pointerdown', e => {
+      active = true; moved = false; long = false;
+      sx = e.clientX; sy = e.clientY; ox = el.offsetLeft; oy = el.offsetTop;
+      el.setPointerCapture(e.pointerId); el.classList.add('press');
+      timer = setTimeout(() => {           // 長押し = この付箋を削除
+        long = true; active = false; el.classList.remove('press');
+        notes = notes.filter(m => m.id !== n.id); save(); renderNotes();
+        if (navigator.vibrate) navigator.vibrate(30);
+        toast('付箋を削除しました');
+      }, 650);
+    });
+    el.addEventListener('pointermove', e => {
+      if (!active) return;
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      if (!moved && Math.hypot(dx, dy) > 6){
+        moved = true; clearTimeout(timer);
+        el.classList.remove('press'); el.classList.add('drag');
+      }
+      if (moved){
+        const W = notesEl.clientWidth, H = notesEl.clientHeight;
+        el.style.left = Math.min(Math.max(0, ox + dx), W - el.offsetWidth) + 'px';
+        el.style.top  = Math.min(Math.max(0, oy + dy), H - el.offsetHeight) + 'px';
+        const t = overlapTarget(el);
+        notesEl.querySelectorAll('.note.target').forEach(x => x.classList.remove('target'));
+        if (t) t.classList.add('target');
+      }
+    });
+    const end = e => {
+      clearTimeout(timer);
+      if (!active) return; active = false;
+      el.classList.remove('press', 'drag');
+      notesEl.querySelectorAll('.note.target').forEach(x => x.classList.remove('target'));
+      if (long) return;
+      if (!moved){                          // タップ = 入力欄へ戻す(元の付箋は削除)
+        cur = String(n.v); fresh = true;
+        notes = notes.filter(m => m.id !== n.id);
+        renderDisplay(); save(); renderNotes();
+        return;
+      }
+      const t = overlapTarget(el);
+      if (t){
+        const target = notes.find(m => m.id === t.dataset.id);
+        openMenu(n, target, ox, oy, e);
+      } else {
+        const W = notesEl.clientWidth, H = notesEl.clientHeight;
+        n.x = el.offsetLeft / W; n.y = el.offsetTop / H; save();
+      }
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
+
+  function overlapTarget(el){
+    const a = el.getBoundingClientRect(); let best = null, bestArea = 0;
+    for (const o of notesEl.querySelectorAll('.note')){
+      if (o === el) continue;
+      const b = o.getBoundingClientRect();
+      const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+      const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      if (w > 0 && h > 0){
+        const ar = w * h, min = Math.min(a.width * a.height, b.width * b.height);
+        if (ar > min * 0.25 && ar > bestArea){ best = o; bestArea = ar; }
+      }
+    }
+    return best;
+  }
+
+  // 重ねたときの演算メニュー: 「下の付箋 ○ ドラッグした付箋」
+  function openMenu(dragged, target, ox, oy, e){
+    menu.innerHTML = '';
+    for (const o of ['+','-','*','/']){
+      const r = compute(target.v, o, dragged.v);
+      const b = document.createElement('button');
+      b.textContent = `${fmtNum(target.v)} ${OPS[o]} ${fmtNum(dragged.v)}` + (isNaN(r) ? '  (不可)' : `  ＝ ${fmtNum(r)}`);
+      if (isNaN(r)) b.disabled = true;
+      b.onclick = () => {
+        notes = notes.filter(m => m.id !== dragged.id && m.id !== target.id);
+        notes.push({id: uid(), v: clean(r), x: target.x, y: target.y});
+        closeMenu(); save(); renderNotes();
+      };
+      menu.appendChild(b);
+    }
+    const c = document.createElement('button');
+    c.className = 'cancel'; c.textContent = 'キャンセル';
+    c.onclick = () => { closeMenu(); renderNotes(); };   // 元の位置に戻す
+    menu.appendChild(c);
+    menu.style.display = 'block';
+    menu.style.left = Math.max(8, Math.min(innerWidth - menu.offsetWidth - 8, (innerWidth - menu.offsetWidth) / 2)) + 'px';
+    menu.style.top = Math.max(8, Math.min(innerHeight - menu.offsetHeight - 8, e.clientY - menu.offsetHeight - 20)) + 'px';
+  }
+  function closeMenu(){ menu.style.display = 'none'; }
+
+  // ---------- 起動 ----------
+  load(); renderDisplay(); renderNotes();
+  addEventListener('resize', renderNotes);
+  document.addEventListener('contextmenu', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>
