@@ -28,7 +28,7 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
   box-shadow:0 2px 4px rgba(0,0,0,.15);touch-action:none;white-space:nowrap}
 .note.drag{z-index:50;box-shadow:0 8px 16px rgba(0,0,0,.3);transform:scale(1.04)}
 .note.press{filter:brightness(.85)}
-.note.target{outline:3px solid var(--merge)}
+.note.target,#disp.target{outline:3px solid var(--merge)}
 #inputrow{display:grid;grid-template-columns:62px 1fr 62px;gap:10px;align-items:center;margin:8px 0}
 #disp{background:var(--note);border-radius:12px;height:62px;padding:2px 14px;text-align:right;
   position:relative;touch-action:none;display:flex;flex-direction:column;justify-content:center}
@@ -286,7 +286,8 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
         el.style.top  = Math.min(Math.max(0, oy + dy), H - el.offsetHeight) + 'px';
         const t = overlapTarget(el);
         notesEl.querySelectorAll('.note.target').forEach(x => x.classList.remove('target'));
-        if (t) t.classList.add('target');
+        dispEl.classList.toggle('target', overDisp(e));
+        if (t && !overDisp(e)) t.classList.add('target');
       }
     });
     const end = e => {
@@ -294,8 +295,9 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
       if (!active) return; active = false;
       el.classList.remove('press', 'drag');
       notesEl.querySelectorAll('.note.target').forEach(x => x.classList.remove('target'));
+      dispEl.classList.remove('target');
       if (long) return;
-      if (!moved){                          // タップ = 入力欄へ戻す(元の付箋は削除)
+      if (!moved || overDisp(e)){           // タップ or 入力欄へドロップ = 入力欄へ戻す(元の付箋は削除)
         cur = String(n.v); fresh = true;
         notes = notes.filter(m => m.id !== n.id);
         renderDisplay(); save(); renderNotes();
@@ -312,6 +314,11 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
+  }
+
+  function overDisp(e){
+    const r = dispEl.getBoundingClientRect();
+    return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top - 10 && e.clientY <= r.bottom;
   }
 
   function overlapTarget(el){
