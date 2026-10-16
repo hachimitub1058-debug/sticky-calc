@@ -84,6 +84,7 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
   const OPS = {'+':'＋','-':'－','*':'×','/':'÷'};
   const STORE = 'sticky-calc-v1';
   const TAX_RATE = 1.10;
+  const LIFT = 40;   // ドラッグ中の付箋を指より上に表示する量(px)
 
   // ---------- 状態 ----------
   let cur = '0', acc = null, op = null, fresh = true;
@@ -241,18 +242,19 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
       }
       if (moved){
         ghost.style.left = (e.clientX - ghost.offsetWidth / 2) + 'px';
-        ghost.style.top  = (e.clientY - ghost.offsetHeight / 2) + 'px';
+        ghost.style.top  = (e.clientY - ghost.offsetHeight / 2 - LIFT) + 'px';
       }
     });
     const finish = e => {
       if (!active) return; active = false;
       if (!moved) return;
+      const gr = ghost.getBoundingClientRect();   // 表示されていた位置をそのまま使う
       ghost.style.display = 'none';
       const area = notesEl.getBoundingClientRect(), dr = dispEl.getBoundingClientRect();
       if (e.clientY < dr.top - 10 && e.clientY > area.top - 30){
-        const w = ghost.offsetWidth, h = ghost.offsetHeight;
-        const x = Math.min(Math.max(0, e.clientX - area.left - w / 2), area.width - w) / area.width;
-        const y = Math.min(Math.max(0, e.clientY - area.top - h / 2), area.height - h) / area.height;
+        const w = gr.width, h = gr.height;
+        const x = Math.min(Math.max(0, gr.left - area.left), area.width - w) / area.width;
+        const y = Math.min(Math.max(0, gr.top - area.top), area.height - h) / area.height;
         notes.push({id: uid(), v: curNum(), x, y});
         resetCalc(); renderDisplay(); save(); renderNotes();
       }
