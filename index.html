@@ -297,7 +297,11 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
       notesEl.querySelectorAll('.note.target').forEach(x => x.classList.remove('target'));
       dispEl.classList.remove('target');
       if (long) return;
-      if (!moved || overDisp(e)){           // タップ or 入力欄へドロップ = 入力欄へ戻す(元の付箋は削除)
+      if (moved && overDisp(e) && curNum() !== 0){   // 入力欄に数値あり: 演算選択
+        openDispMenu(n, e);
+        return;
+      }
+      if (!moved || overDisp(e)){           // タップ or 空の入力欄へドロップ = 入力欄へ戻す(元の付箋は削除)
         cur = String(n.v); fresh = true;
         notes = notes.filter(m => m.id !== n.id);
         renderDisplay(); save(); renderNotes();
@@ -338,17 +342,30 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
 
   // 重ねたときの演算メニュー: 「下の付箋 ○ ドラッグした付箋」
   function openMenu(dragged, target, ox, oy, e){
+    buildMenu(target.v, dragged.v, r => {
+      notes = notes.filter(m => m.id !== dragged.id && m.id !== target.id);
+      notes.push({id: uid(), v: r, x: target.x, y: target.y});
+      save(); renderNotes();
+    }, e);
+  }
+
+  // 入力欄へ付箋をドロップ: 「入力欄の値 ○ 付箋の値」の結果を入力欄へ
+  function openDispMenu(dragged, e){
+    buildMenu(curNum(), dragged.v, r => {
+      notes = notes.filter(m => m.id !== dragged.id);
+      cur = String(r); acc = null; op = null; fresh = true;
+      renderDisplay(); save(); renderNotes();
+    }, e);
+  }
+
+  function buildMenu(a, bv, onPick, e){
     menu.innerHTML = '';
     for (const o of ['+','-','*','/']){
-      const r = compute(target.v, o, dragged.v);
+      const r = compute(a, o, bv);
       const b = document.createElement('button');
-      b.textContent = `${fmtNum(target.v)} ${OPS[o]} ${fmtNum(dragged.v)}` + (isNaN(r) ? '  (不可)' : `  ＝ ${fmtNum(r)}`);
+      b.textContent = `${fmtNum(a)} ${OPS[o]} ${fmtNum(bv)}` + (isNaN(r) ? '  (不可)' : `  ＝ ${fmtNum(r)}`);
       if (isNaN(r)) b.disabled = true;
-      b.onclick = () => {
-        notes = notes.filter(m => m.id !== dragged.id && m.id !== target.id);
-        notes.push({id: uid(), v: clean(r), x: target.x, y: target.y});
-        closeMenu(); save(); renderNotes();
-      };
+      b.onclick = () => { closeMenu(); onPick(clean(r)); };
       menu.appendChild(b);
     }
     const c = document.createElement('button');
