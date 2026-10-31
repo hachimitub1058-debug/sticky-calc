@@ -220,10 +220,13 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
 
   // 緑ボタン: 付箋を全部足し算して1枚に
   $('btnMerge').addEventListener('click', () => {
-    if (notes.length === 0){ toast('付箋がありません'); return; }
-    const sum = clean(notes.reduce((s, n) => s + n.v, 0));
-    const first = notes[0];
-    notes = [{id: uid(), v: sum, x: first.x, y: first.y}];
+    pressEq();                              // 保留中の計算があれば先に確定
+    const inp = curNum();
+    if (notes.length === 0 && inp === 0){ toast('付箋がありません'); renderDisplay(); return; }
+    const sum = clean(notes.reduce((s, n) => s + n.v, 0) + inp);
+    const pos = notes[0] || {x: 0.3, y: 0.05};
+    notes = [{id: uid(), v: sum, x: pos.x, y: pos.y}];
+    resetCalc(); renderDisplay();
     save(); renderNotes();
   });
 
