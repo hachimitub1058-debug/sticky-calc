@@ -26,7 +26,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
 header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opacity:.7}
 #notes{position:relative;flex:1;min-height:120px;touch-action:none}
 .note{position:absolute;background:var(--note);color:var(--text);border-radius:12px;
-  padding:5px 10px;font-size:22px;font-weight:500;text-align:right;min-width:64px;
+  padding:8px 14px;font-size:28px;font-weight:500;text-align:right;min-width:80px;
   box-shadow:0 2px 4px rgba(0,0,0,.15);touch-action:none;white-space:nowrap}
 .note.drag{z-index:50;box-shadow:0 8px 16px rgba(0,0,0,.3);transform:scale(1.04)}
 .note.press{filter:brightness(.85)}
@@ -84,6 +84,7 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
   const OPS = {'+':'＋','-':'－','*':'×','/':'÷'};
   const STORE = 'sticky-calc-v1';
   const TAX_RATE = 1.10;
+  let zTop = 1;
   const LIFT = 40;   // ドラッグ中の付箋を指より上に表示する量(px)
 
   // ---------- 状態 ----------
@@ -218,16 +219,15 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
     b.addEventListener('pointercancel', end);
   })();
 
-  // 緑ボタン: 付箋を全部足し算して1枚に
+  // 緑ボタン: 付箋と入力欄を全部足し算して、結果を入力欄へ(付箋は全て消える)
   $('btnMerge').addEventListener('click', () => {
     pressEq();                              // 保留中の計算があれば先に確定
     const inp = curNum();
     if (notes.length === 0 && inp === 0){ toast('付箋がありません'); renderDisplay(); return; }
     const sum = clean(notes.reduce((s, n) => s + n.v, 0) + inp);
-    const pos = notes[0] || {x: 0.3, y: 0.05};
-    notes = [{id: uid(), v: sum, x: pos.x, y: pos.y}];
-    resetCalc(); renderDisplay();
-    save(); renderNotes();
+    notes = [];
+    cur = String(sum); acc = null; op = null; fresh = true;
+    renderDisplay(); save(); renderNotes();
   });
 
   // ---------- 入力欄 → 付箋 ----------
@@ -272,18 +272,18 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
     el.addEventListener('pointerdown', e => {
       active = true; moved = false; long = false;
       sx = e.clientX; sy = e.clientY; ox = el.offsetLeft; oy = el.offsetTop;
-      el.setPointerCapture(e.pointerId); el.classList.add('press');
+      el.setPointerCapture(e.pointerId); el.classList.add('press'); el.style.zIndex = ++zTop;
       timer = setTimeout(() => {           // 長押し = この付箋を削除
         long = true; active = false; el.classList.remove('press');
         notes = notes.filter(m => m.id !== n.id); save(); renderNotes();
         if (navigator.vibrate) navigator.vibrate(30);
         toast('付箋を削除しました');
-      }, 650);
+      }, 900);
     });
     el.addEventListener('pointermove', e => {
       if (!active) return;
       const dx = e.clientX - sx, dy = e.clientY - sy;
-      if (!moved && Math.hypot(dx, dy) > 6){
+      if (!moved && Math.hypot(dx, dy) > 12){
         moved = true; clearTimeout(timer);
         el.classList.remove('press'); el.classList.add('drag');
       }
@@ -341,7 +341,7 @@ header{text-align:center;font-size:22px;font-weight:300;padding:10px 0 4px;opaci
       const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
       if (w > 0 && h > 0){
         const ar = w * h, min = Math.min(a.width * a.height, b.width * b.height);
-        if (ar > min * 0.25 && ar > bestArea){ best = o; bestArea = ar; }
+        if (ar > min * 0.5 && ar > bestArea){ best = o; bestArea = ar; }
       }
     }
     return best;
